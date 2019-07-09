@@ -1,0 +1,898 @@
+==Abstract==
+
+We propose here a decentralized, non-custodial, trustless, and intermediary-free 
+cryptocurrency exchange platform. 
+
+The primary service provided by the decentralized exchange (DEX) is to match 
+clients who would like to trade an asset of one type for an asset of another.
+Trades are facilitated by a trustless atomic swap negotiation process carried 
+out with all the cryptographic security guarantees of the respective blockchains.
+
+Elimination of per-trade fees reduces the benefit an exchange operator might 
+accrue from facilitating wash trading to artificially elevate trade volumes. 
+Instead, user fees are collected as a one-time registration fee subject to loss 
+upon violations of community conduct.
+
+A custom order matching procedure is offered to mitigate abuses that commonly 
+arise from high-frequency trading (HFT) algorithms and other bot-driven trading.
+
+==Introduction==
+
+Existing cryptocurrency exchange platforms fall into 4 overlapping categories: 
+custodial corporate entities, services, tokens, and blockchains.
+The vast majority of cryptocurrency trading is currently performed via 
+centralized, custodial exchanges. 
+Since trades at these exchanges take place off-chain, they generally settle 
+instantly to make funds available for further trading. 
+This is a nice feature, but it practically guarantees that the market 
+will be a target of HFT and algorithmic traders, which can be unpredictable and 
+malicious. 
+Additionally, such exchanges earn revenue by collecting trading fees. 
+Such a model creates incentives for an exchange to artificially inflate their 
+volume by wash trading &#91;1&#93;. 
+By one study, it has been estimated that more than 95% of reported exchange 
+volume is faked 
+[https://www.sec.gov/comments/sr-nysearca-2019-01/srnysearca201901-5164833-183434.pdf &#91;2&#93;]
+
+Several DEX projects have been created to address some of these issues by 
+replacing the exchange with a blockchain or a token, and they have met with 
+varying degrees of success. 
+While they remove the trusted third party (TTP), they insert their own products 
+as a means to capture the trading fees (e.g. ...), which replaces the TTP 
+friction with a new platform friction. 
+The simple act of collecting trading fees serves to act as an incentive to 
+centralize on a given solution, which runs counter to a system of open voluntary 
+exchange. 
+While a chain or token serves to remove the TTP, it also creates challenges with 
+order matching, which typically occurs via the intermediate chain or token.
+
+The DEX described in this document is based on atomic swaps, signed and 
+transmitted by the clients. Thus, the exchange of funds is trustless and secure. 
+The purpose of the DEX is to facilitate such peer-to-peer trades, while 
+disincentivizing manipulative or abusive trading patterns, and utilizing an 
+independently verifiable order matching algorithm that is difficult to game by 
+traders and operators alike. The proposed DEX is not: an escrow service, and 
+arbitration service, or a platorm for HFT.
+
+While trades are fully trustless, steps are taken to discourage malicious 
+clients from hindering normal trade activity. 
+Registered clients are bound by the 
+[[#community-conduct|rules of community conduct]], violation of which typically
+results in loss of trading privileges and registration fee. 
+Less drastic punitive measures such as a cool-down period may be considered 
+for minor, first-time or infrequent conduct violations.
+
+The following list of non-negotiable, fundamental, DEX properties served as a 
+basis for design. 
+
+# Non-custodial.  Assets must be traded directly between clients, without the exchange being in control of assets at any time.
+
+# Intermediary-free. Trades must be executed in a secure and trustless manner.
+
+# Resistant to malicious or manipulative trading. Delibarately distruptive behaviour should be disincentivized, and volume manipulation mitigated by pseudo-random epoch-based order matching.
+
+The remainder of this document details the design of the proposed DEX. 
+It is intended as a first resource when implementing servers and clients.
+Continuing client-server interoperability will likely depend on subtle aspects 
+of the specification laid out in the following sections.
+
+'''[[#communication-protocols|Communication Protocols]]''' provides preliminary background on the 
+chosen messaging convention (JSON-RPC 2.0) and communication layer technologies 
+that are to be used in implementing the DEX.
+
+'''[[#distributed-exchange-design-fundamentals|Distributed Exchange Design Fundamentals]]''' describes the notable 
+design aspects that facilitate an exchange service with the features described 
+above.
+
+'''[[#client-order-management|Client Order Management]]''' details the different order types and the 
+client/server workflows required to place the orders.
+
+'''[[#concept-of-operations|Concept of Operations]]''' details the interactions of the server and 
+clients through registration, order matching, and the entire order execution 
+process via an atomic swap.
+
+==Communication Protocols==
+
+===WebSockets===
+
+Trustless negotiation of trades requires considerable messaging.
+Transaction details must be reported and relayed at appropriate times, sometimes
+with substantial delays between subsequent actions. 
+Match notification via HTTP polling or other request interval-based methods are 
+thus not suitable for the DEX system.
+Persistent, full-duplex communication is critical to minimizing communication 
+latencies and wasted bandwidth.
+WebSockets are chosen as the default and preferred communcations protocol for 
+the DEX exchange API.
+In addition to fulfilling the aforementioned needs, WebSockets are now a 
+well-established technology with client software available for integration in 
+virtually all popular programming languages.
+
+To establish a WebSocket connection, a client must first supply connection parameters. 
+
+<pre>
+{
+    "method": "connect",
+    "id": 0,
+    "params": {
+        "accountid": "string"
+    }
+}
+</pre>
+
+Once a connection is established, the client may begin subscribing to relevant 
+data and order feeds. 
+By default, a client will be subscribed only to updates for orders submitted on 
+the existing connection.
+
+Subscriptions will follow the general format below. The <code>params</code> will 
+vary with subscription type.
+
+<pre>
+{
+    "method": "subscribe",
+    "id": int,
+    "params": {
+        "channel": "string",
+        ...
+    }
+}
+</pre>
+
+===JSON-RPC===
+
+JavaScript Object Notation - Remote Procedure Call v2.0 (JSON-RPC 2.0) is a 
+message formatting protocol for client-server communications 
+[https://www.jsonrpc.org/specification &#91;3&#93;].
+The DEX server API uses JSON-RPC exclusively for both inbound and 
+outbound client communications.
+The JSON-RPC structure is simple and flexible.
+
+<pre> 
+{
+	"method": "string",
+	"id": int,
+	"params": {} || []
+}
+</pre>
+
+<pre>
+{
+	"result": {...} || null,
+	"error": {...} || null,
+	"id": int
+}
+</pre>
+
+The <code>method</code> is the "remote procedure" being called, analagous to
+calling a function. 
+Most parameters are passed as part of a <code>params</code> object or array. 
+Parameters will vary with method.
+The <code>id</code> field links a response to a request, and is optional for
+''notifications'' which require no response.
+
+JSON-RPC 2.0 specifies that in the case of an error, the response's <code>error</code>
+field will be non-<code>null</code> and the <code>result</code> field will be 
+<code>null</code>. 
+The opposite is true in the case of a success.
+
+===HTTP===
+
+An API using HTTP for message transport may be provided for basic account 
+management and server status queries, however WebSocket connections are to be 
+the sole means for placing, monitoring, and executing orders in the processes 
+described in Sections 5 and 6.
+The primary reason for limiting the scope of the HTTP API is to eliminate client 
+polling for rapidly chaning resources, such as order status API endpoints.
+
+
+==Distributed Exchange Design Fundamentals==
+
+There are several notable aspects of the DEX design that were chosen to permit 
+peer-to-peer trades with the mechanics of order execution existing entirely on 
+the separate blockchains via atomic swaps.
+These are:
+* Fixed lot size per market (multiple markets per trading pair), and equivalent lot sizes between trading pairs for a given asset
+* Epoch-based pseudorandom order matching
+* Client identities based on public key infrastructure (PKI)
+* Registration fees in place of per-trade fees
+* An open and rigidly-defined interface for integration of arbitrary assets.
+
+This section describes each of these design aspects.
+
+===Fees===
+
+Rather than collecting fees on each trade, fees are collected by the pool during 
+registration only.
+Registration fees discourage certain spam attacks, and help to cover DEX 
+operating expenses.
+Further, collecting fees from trades executed via atomic swaps (where the server 
+is never in control of funds, and settlement occurs directly on-chain) would 
+add considerable complexity to the swap process.
+Registration fees will be configurable by the exchange operator, but the fee 
+would need to be resonable for both the client and server operator.
+
+===Lot Sizes===
+
+Each market will have a specified lot size that is configurable by the exchange 
+operator.
+This is done to simplify the atomic swap process, and to reduce on-chain fees on 
+the respective blockchains.
+Order quantities must be in integer multiples of the lot size.
+
+The different trading pairs for a given asset (e.g. DCR/BTC and DCR/LTC) will 
+use the same fixed lot sizes to ameliorate the burden of moving funds from one 
+market to another.
+
+Lot sizes may change over time, so the client should periodically request the 
+up-to-date market limits using the '''lotsize''' method (no <code>params</code> 
+required), although a place order request with invalid amounts for the current 
+lot size will be met with a server response with a non-null error.
+
+A sample positive response to a <code>lotsize</code> request will have the 
+following <code>result</code> fields.
+
+{|
+! field !! type !! description
+|-
+| assets || [{"BTC": [0.001, 0.1], ...}]
+|}
+
+The lot size objects in the `assets` list will have two fields.
+
+{|
+! field !! type !! description
+|-
+| symbol || string || asset symbol
+|-
+| lotsize || integer || lot size in smallest asset unit (e.g. Decred atoms)
+|}
+
+===Epoch-based Order Matching===
+
+In order to devalue predatory behavior exhibited by certain high-frequency 
+trading algorithms, orders are not matched continuously, but in epochs of 
+fixed duration.
+Specifically, "taker" orders on the server will be matched pseudorandomly 
+within predetermined time epochs to make it much more difficult to frontrun 
+order flow.
+That is, all taker orders placed within the same epoch form two pools of orders
+(buy, sell) that are pseudorandomly shuffled, using a deterministic and
+verifiable algorithm, before matching.
+
+Limit orders are not eligible for matching until the epoch after they are
+received.
+
+====Epoch Time====
+
+For a given epoch duration '''''d > 0''''' , and current UNIX epoch time stamp 
+'''''t''''' (in seconds since Jan 01 00:00:00 1970 UTC), the current order 
+matching epoch index, '''''i''''', and epoch range are computed as 
+
+[[File:spec/images/epoch-index.png]]
+
+For example, at the time of writing, '''''t = 1562008475''''' , which for 
+duration '''''d = 10''''' corresponds to epoch number '''''i = 156200847''''' 
+spanning '''''&#91;1562008470, 1562008480)'''''.
+This convention allows epoch times to be known without querying the server.
+
+====Pseudorandom Order Matching====
+
+When the epoch ends, a match cycle begins. Market orders are grouped by side 
+(buy or sell) and a pseudo-random sequence value assigned to each order. This is
+used to determine processing order.
+
+Limit order placed in this epoch are not eligible for matching until the next 
+epoch. Market orders will only match with "standing" limit orders from previous
+epoch. Limit orders match best-price-first. If more than one standing limit 
+order has the same price, they will be shuffled before matching. 
+
+Orders accumulated in the epoch are matched with standing book orders, where a 
+valid order pair may be:
+
+* a market buy and a limit sell
+* a limit buy and a market sell
+* a limit buy and a limit sell with overlapping limit prices
+
+Each order in the epoch order pool is assigned a priority by shuffling the order 
+pool.
+Shuffling will be deterministic, using the Fisher-Yates algorithm where the 
+random number generator seed is derived from the hash of the concatenated order 
+ID hashes.
+Specifically for hash function '''''f''''', the seed hash, 
+'''''H<sub>seed</sub>''''' is computed as 
+
+[[File:spec/images/seed-eq.png]]
+
+where '''''order<sub>i</sub>''''' represents the order ID of the ith order in a 
+lexicographically sorted list of order IDs, '''''||''''' indicates 
+concatenation, and '''''/''''' is integer division.
+
+Each order's unique ID and corresponding hash are assigned as the order is 
+placed, and published at the start of the matching process.
+This is done so that the shuffling may be independently computed for external 
+verification and to facilitate server mesh operation.
+Section 5 describes the order submission and ID assignment.
+
+Cancellations are processed first. Cancellation can potentially carry a penalty 
+if the client's cancel:complete ratio falls below community conduct guidelines. 
+
+Having prioritized each taker order in the epoch pool with a pseudorandom and 
+verifiably unbiased process, matching begins with the first order in the list.
+The order is paired with the best possible 
+(in terms of rate) compatible standing limit order(s), and the orders are queued 
+for monitoring by the DEX. Both clients are immediately informed.
+
+The process continues with the next order in the list and iterates until all 
+orders are removed from the list.
+
+New limit orders are then added to the orderbook. 
+Any taker limit orders which are not type "Immediate" and which did not fully 
+match are added to the orderbook as well.
+
+By virtue of the above algorithm, an individual or collaborating pair cannot 
+guarantee their orders will be matched in the presence of other orders in the 
+same epoch.
+This will help mitigate wash trading and order frontrunning.
+
+===Identities based on Public Key Infrastructure (PKI) Key Pairs===
+
+The server as well as the clients are identified and authenticated using public 
+keys, with matching private keys used to sign and authorize orders.
+This is done because...
+
+===Blockchain Interaction===
+
+Administration of the DEX will require that the exchange operator have access to 
+trusted nodes for each of the assets supported.
+While operation via a surrogate blockchain data service such as a block explorer 
+is potentially feasible, it would entail significant security risks.
+Initial development will use only a direct connection to full nodes of each 
+supported asset's blockchain.
+
+With the exception of Decred and Bitcoin, which will be implemented during 
+initial phases of DEX development, project developers will be responsible for 
+adding support for their particular asset. 
+
+Adding support for an asset is accomplished by implementing a particular 
+[https://golang.org/ Go] interface. 
+The interface is exported and compiled with `-buildmode=plugin` to enable 
+dynamic importing by the exchange operator. 
+The operator will decide which plugins to import in the DEX configuration. 
+
+<pre>
+type DExAsset interface {
+  // Initialize the asset. An channel is passed that will receive a signal
+  // when a new block is added to the chain. 
+  // The path to a configuration file is the only other argument. 
+  // The configuration file format is not formalized, so the asset developer
+  // will need to publish instructions for configuration.
+  Initialize(chan struct{}, string) error
+  // UTXO retreives info about the transaction output.
+  UTXO(string, int) (DExUTxO, error)
+}
+
+type DExUTxO interface {
+	Confirmations() int
+	Valid() bool
+	Address() string
+	Lock() [32]byte
+	Key() [32]byte
+}
+</pre>
+
+While the community may have an interest in formally monitoring asset software 
+for bugs and malicious behavior, the initial round of DEX development will 
+implement only rudimentary error checking and quarantine procedures. 
+
+==Client Order Management==
+
+The order types that must be handled are limit, market, and cancel orders. Limit 
+orders are used to buy or sell a specified amount of an asset at a rate no 
+higher (buy) or lower (sell) than a given limit price.  Market orders are used 
+to buy or sell a specified amount of an asset at the best price available. 
+Cancel orders are used to cancel unfilled limit or market orders.
+
+Orders placed in the duration of an epoch are accumulated and selected 
+pseudo-randomly for matching, as described in 
+[[#epoch-based-order-matching|Epoch-based Order Matching]]. This section describes 
+the steps required of the client to place an order 
+([[#order-preparation|Order Preparation]]), and the interactions between the 
+client and server to execute an order once a match has been selected.
+	
+Also note that a DEX client will communicate with both the DEX server and their 
+own cryptocurrency wallets so that the client can:
+* Communicate order data and swap status to the server
+* Perform the atomic swaps (i.e. create contracts and redeem on the client asset's blockchain)
+
+===Order Preparation===
+
+The following steps are required to prepare to place a market or limit order to 
+trade assets on chain A for assets on chain B.
+
+# Client chooses an amount of an asset on chain A that they wish to use for an order, and provides this amount to a wallet they control for chain A.
+
+# Wallet A selects one or more UTXOs that sum to at least the amount specified.
+
+# Client requests a new address from wallet B to include in the order as the destination for the funds.
+
+# Client requests wallet A signs the order using the corresponding private keys (how is this done in the case of multiple UTXOs? spell it out.) to demonstrate control of the funds.
+
+===Limit Orders===
+
+Limit orders are for the trade of assets at a rate no higher (buy) or lower 
+(sell) than a specified price. 
+The client may specify the "time in force" of a limit order as one of: (a) 
+''Standing'', which remains on the books until filled or cancelled, or (b) 
+''Immediate'', which will be cancelled if it is not filled during during epoch 
+order matching. As such, the ''Immediate'' option is intended for limit orders 
+with a price that crosses the spread (i.e. a taker rather than a maker).
+The order <code>quantity</code> must be an integer multiple of the lot size 
+(see 3.1.4). 
+
+# Client submits limit order as a signed message that includes the fields listed below, where signatures demonstrate control of the unspent funds and the long-lived identity of the client.
+
+# Server receives the order, adds the time, signs it, stores it and replies to the client with the signed order and an order id.
+
+# Server broadcasts the limit order to other connected clients, after removing the client identity signature, and adds it to its order book.
+
+# Server accumulates a queue of orders, and matches orders once an epoch.
+
+# Server signs and publishes the matched orders, after removing the identity signatures, at the end of the epoch, updates order book
+
+
+The anticipated data fields for the limit order <code>params</code> field are 
+listed here. The <code>accountid</code> field is retrieved during registration 
+as described in Section 5.1.
+
+{|
+! field     !! type   !! description
+|-
+| accountid || string || client account identifier
+|-
+| timestamp || int    || UTC timestamp generated at the time of order submissioation of trades requires a fair amount of messaging between the 2 clients, via the DEX trade API.n
+|-
+| tradepair || string || market. trading pair. e.g. DCR/BTC
+|-
+| ordertype || string || "limit" for a limit order
+|-
+| direction || string || one of "buy" or "sell
+|-
+| ordersize || int    || order size, in atoms (\*1e8
+|-
+| price     || int    || price, in atoms/Satoshi or similar (\*1e8
+|-
+| utxotxid  || string || transaction hash associated with the utxo
+|-
+| utxoindex || int    || the index of the utxo in the transaction outputs
+|-
+| nonce     || string (int|?) | a unique value which identifies this order in communications
+|-
+| signonce  || string || signature of the nonce showing control of UTXO
+|-
+| sigorder  || string || signature of the order data by account privkey
+|}
+
+The successful response will contain a unique order ID that must be referenced for cancellation. 
+
+{|
+! field     !! type   !! description
+|-
+| orderid   || int    || unique server generated id for a submitted order
+|-
+| sigorder  || string || signature of the order by server
+|}
+
+===Market Orders===
+
+# Client submits market order as a signed message, where signatures demonstrate control of the unspent funds and the long-lived identity of the client
+
+# Server receives the order, adds the time, signs it, stores it, and replies to the client with the signed order and an order id
+
+# Server broadcasts the market order to other connected clients, after removing the client identity signature
+
+# Server accumulates a queue of orders, and matches orders  once an epoch
+
+# Server signs and publishes the matched orders, after removing the identity signatures, at the end of the epoch, updates order book
+
+{|
+! field     !! type   !! description
+|-
+| accountid || string || client account identifier
+|-
+| timestamp || int    || UTC timestamp. order broadcast time
+|-
+| tradepair || string || market. trading pair. e.g. DCR/BTC
+|-
+| ordertype || string || "market" for a market order
+|-
+| direction || string || one of "buy" or "sell
+|-
+| ordersize || int    || order size, in atoms (\*1e8
+|-
+| utxotxid  || string || transaction hash associated with the utxo
+|-
+| utxoindex || int    || the index of the utxo in the transaction outputs
+|-
+| nonce     || string (int|?) | random nonce for this order
+|-
+| signonce  || string || signature of the nonce showing control of UTXO
+|-
+| sigorder  || string || signature of the order data by account privkey
+|-
+|}
+
+The successful response will contain a unique order ID that must be referenced for cancellation. 
+
+{|
+! field     !! type   !! description
+|-
+| orderid   || int    || unique server generated id for a submitted order
+|-
+| sigorder  || string || signature of the order by server
+|-
+|}
+
+===Cancel Order===
+
+Cancel orders cancel existing orders and remove them from the order book. 
+
+# Client submits cancel order as a signed message that references the corresponding unfilled order, where signatures demonstrate control of the unspent funds and the long-lived identity of the client
+
+# Server receives the order, adds the time, signs it, stores it and replies to the client with the signed order and an order id
+
+# Server broadcasts the cancel order to other connected clients, after removing the identity signature
+
+# Server accumulates a queue of orders, and matches orders  once an epoch
+
+# Server signs and publishes the matched orders, after removing the identity signatures, at the end of the epoch, updates order book
+
+{|
+! field     !! type   !! description
+|-
+| accountid || string || client account identifier
+|-
+| timestamp || int    || UTC timestamp. order broadcast time
+|-
+| tradepair || string || market. trading pair. e.g. DCR/BTC
+|-
+| orderid   || int    || order identifier
+|-
+| nonce     || string (int?) || a unique value which identifies this order in communications
+|-
+| signonce  || string || signature of the nonce showing control of UTXO
+|-
+| sigorder  || string || signature of the cancellation data by account privkey
+|}
+
+The successful response will contain a unique order ID. 
+
+{|
+! field     !! type   !! description
+|-
+| orderid   || int    || unique server generated id for a submitted order
+|-
+| sigorder  || string || signature of the order by server
+|}
+
+==Concept of Operations==
+
+This section describes how the exchange service matches orders from registered 
+users, and facilitates order execution by the clients directly on their assets' 
+blockchains.
+
+
+===Account Creation===
+
+Access to markets is granted to client identities represented in long-lived PKI 
+key pairs [ref?] fee to the exchange.
+The process of establishing an identity on the server and gaining authorization 
+for a particular market proceeeds as follows.
+
+# Client connects to server and both identify themselves using a long-lived PKI keypair (TODO: purpose and background on this approach vs. e.g. just passwords or other tokens) after the associated client has paid a (one-time) fee
+
+# Server responds with a fee that the client must pay to get a trading account on the server. Separeate fees may be required for individual markets since the potential for abuse may vary based on the market lot sizes or order book.
+
+# Client pays the fee, and server gives the client’s long-lived PKI public key access to one or more markets.
+
+An authenticated and authorized client may proceed to place orders as described 
+in Section 5.
+
+===Epoch Order Cycle===
+
+Orders are matched with other orders in the same processing epoch (see Section 4.2) using the following algorithm.
+
+# Every 10 seconds, a match cycle is initiated.  The period over which orders are collected in a queue is called an "epoch". 
+# The market, limit and cancel orders for each market are collected and pseudorandomly sorted, based on the hash of the hashes of the orders in the queue. Users who want more control over their fill price should use limit orders.
+# Orders are executed according to the pseudorandom ordering, where they are matched against limit orders in the order book. If an order exhausts a given limit order, the next best order is selected until the order is satisfied.
+
+An epoch commences in 5 distinct steps. 
+
+# Accumulation
+
+# Cancellation
+
+# Randomization
+
+# Matching
+
+# Limit Order Sorting
+
+<img src="spec/images/empty-epoch.svg" align="right">
+At the beginning of the epoch, there are only standing limit orders. 
+The '''epoch pool''' where orders are collected is empty.  
+Every limit or market order has a quantity, which is an integer multiple of the 
+base asset's lot size. 
+Every order is also assigned a unique ID (the L#’s in the diagrams). Limit 
+orders are kept ordered by price rate. 
+For buy orders, the zeroth price bin contains all orders who share the highest 
+rate of the buy orders. 
+For sell orders, the zeroth price bin contains those orders that share the 
+lowest price of the sell orders.
+
+'''Accumulation'''
+
+For the duration of the epoch, orders are accumulated and sorted by order type 
+and direction. 
+Rather than sorting by market and limit, orders are sorted by taker and maker, 
+so that limit orders with parameters that can potentially match with standing 
+limit orders on the other side will participate in the match cycle. 
+
+<img src="spec/images/full-epoch.svg">
+
+'''Cancellation'''
+
+<img src="spec/images/cancel-order.svg" align="right">
+Cancellations are processed first. Order doesn’t matter. 
+Orders removed during this step will not be available to match with any taker 
+orders in the epoch pool. 
+
+'''Randomization'''
+
+The market orders for each direction are assigned a pseudo-random sequencing 
+value. 
+This value determines the order in which they will be processed.
+
+'''Order Matching'''
+
+Orders are then matched. 
+Taker orders match against zeroth bins first, and proceed away from the best 
+price a bin at-a-time.
+
+During matching, orders may be divided to facilitate matching with more than one 
+other participant. 
+These divisions must still obey the integral lot multiple rule. 
+Partially filled orders are not removed from the stack.
+
+<img src="spec/images/order-matching.svg">
+
+'''Limit Order Sorting'''
+
+Limit orders are added to the stack. If more than one limit order share a rate, 
+they will undergo a shuffle at this time.
+
+The end of step 6 could be thought of as the beginning of a new epoch, starting 
+again at step 1, though in practice the orders have already been accumulating 
+while this epoch processed. 
+
+<img src="spec/images/limit-sorting.svg">
+
+===Atomic Settlement===
+
+In order to facilitate trustless, non-custodial exchange, the DEX leverages an 
+atomic swap process that enables all parties to maintain full control over their 
+assets throughout the entire trade.
+The DEX primarily acts as a matchmaker, connecting two orders and relaying 
+messages between the two clients. 
+Additionally, the DEX performs some trade monitoring to ensure that parties are 
+acting in good faith. 
+Clients who fail to act on their trades appropriately will be issued a penalty 
+in accordance with the [[#community-conduct|rules of community conduct]].
+
+The following case walkthroughs provide a high-level overview of the entire trade 
+process, and attempt to illustrate how to handle a perfect match, a partial 
+fill, and multiple matches within an epoch. 
+For the sake of illustration, the following simplifications are made.
+
+<img src="spec/images/ab-profiles.svg" align="right">
+# The lot size for the market is 1 DCR. 
+# All initial holdings of the participants are in the form of a single UTXO.
+# There are no fees. 
+
+The examples involve a participant named Alice, who holds some DCR and would 
+like to exchange it for some BTC. 
+The market is a DCR/BTC market, where DCR is the “base asset” and BTC is the 
+“quote asset”. 
+Order quantities are in units of DCR, and the rate offered in a limit order is 
+denominated in BTC.
+
+====Case A: Perfect match====
+
+In the most basic case, Alice and a trader named Bob are the only participants 
+and their order quantities are identical. 
+
+'''A1: Alice places a limit order''' to sell 3 DCR at 0.1 BTC per DCR for a 
+total of 0.3 BTC. 
+The order isn’t eligible for matching until the next epoch. 
+<img src="spec/images/alice-order.svg" align="left">
+As a limit order, Alice must specify both the quantity and the price, as a rate. 
+The order also specifies an address for an as-yet unexposed public key under 
+Alice’s control. 
+Alice also signs the order information. The signature provides proof of the 
+order and justifies any penalties imposed on Alice should she fail to follow 
+through on a trade.
+
+<img src="spec/images/bob-order.svg" align="right">
+'''A2''': During some later epoch, '''Bob places a market order''' to buy DCR 
+with BTC at the best available price. 
+Similarly to Alice’s limit order, Bob’s order will contain both an address and a 
+signature. As a market order, Bob’s order must match in this epoch, 
+or will be immediately cancelled. 
+
+'''A3''': At the end of the epoch, the '''DEX performs a match cycle''', 
+recognizes the match, and informs both Alice and Bob that a match has occurred. 
+Because the order quantities are identical, the orders are simply removed from 
+the book and set aside for monitoring. 
+The DEX informs both clients that a match has been made and provides Bob with 
+Alice’s address. 
+
+<img src="spec/images/ab-match.svg">
+
+'''A4''': Because Bob is the taker, he will broadcast his initialization 
+transaction first. 
+Bob will also be expected to broadcast and report his transaction to the DEX 
+within a specified amount of time. 
+
+Before Bob can '''prepare his initialization transaction''', he must generate a 
+key known only to himself. 
+From the key, Bob generates a “lock” and with it constructs an output script 
+such that if someone can provide both Bob’s key and the pubkey for Alice’s 
+specified address, they can spend the output. 
+In practice, the key is simply a random 32-byte number, and the lock is it’s 
+hash. 
+
+In addition, Bob constructs the output with a second, alternative lock that 
+allows Bob to spend the output himself, but only if the output remains unspent 
+for a specified amount of time. Bob sets his timelock to 48 hours.
+
+'''Bob broadcasts his initialization transaction''' to the Bitcoin network. 
+He informs the DEX of the transaction details, which the DEX relays to Alice 
+along with Bob’s Decred address. Bob '''does not''' reveal the key that he 
+created in step 4. 
+
+<img src="spec/images/bob-init.svg">
+
+'''A5: Alice prepares her initialization transaction'''. Alice uses the lock 
+that Bob created for his output, which she retrieves during inspection of Bob’s 
+initialization transaction., and creates a contract satisfied by Bob’s key and 
+the pubkey for Bob’s address. 
+
+Alice sets her timelock to 24 hours. Alice should also check that Bob’s timelock 
+is set to 48 hours. If Bob’s timelock duration is set near or below Alice’s 
+timelock duration, Bob could potentially spend both outputs before Alice. 
+
+'''Alice broadcasts her initialization transaction''' to the Decred network. 
+She informs the DEX of the transaction details, and the DEX relays the 
+information to Bob. 
+
+<img src="spec/images/alice-init.svg">
+
+'''A6: Bob prepares a redemption transaction''' that spends the output from 
+Alice’s initialization transaction. 
+In order to spend the Decred from Alice’s transaction, he needs to provide the 
+key. 
+
+'''Bob broadcasts his redemption transaction'''.
+Though both the DEX and Alice are capable of monitoring for the transaction, it 
+is expected that Bob informs the DEX server of the transaction details anyway. 
+The DEX server will notify Alice of the details, and mark the order as filled. 
+
+<img src="spec/images/bob-redeem.svg">
+
+'''A7: Alice prepares her redemption transaction''' using the key gleaned from 
+Bob’s redemption transaction and the output from Bob’s initialization 
+transaction.
+
+'''Alice broadcasts her redemption transaction, completing the atomic swap.'''
+
+<img src="spec/images/alice-redeem.svg">
+
+====Case B: Multi-taker with partial fill====
+
+In case B, Alice is similarly trying to sell 3 DCR for 0.3 BTC, but the match 
+found by the DEX is not perfect this time. 
+
+'''B1''': This step is the same as A1. Alice submits her signed order to the 
+DEX.
+
+'''B2''': Bob places a market order for 1 DCR. A new client, Carl, places an 
+identical market order for 1 DCR.
+
+<img src="spec/images/abc-order.svg">
+
+'''B3''': The DEX finds the match and informs all parties, providing Bob and 
+Carl with Alice’s address. 
+The DEX cannot simply remove Alice’s order, because it is only partially filled. 
+In this case, the DEX does not remove Alice’s order from the order book, instead 
+just marking it partially filled and calculating the remaining quantity.
+
+<img src="spec/images/abc-match.svg">
+
+<img src="spec/images/bc-init.svg" align="right">
+'''B4''' goes in a similar fashion to '''A4''', with both Bob and Carl creating 
+their own keys and key hashes and broadcasting their initialization transactions. 
+
+'''B5''': Alice has a couple of choices here. She can create separate 
+transactions for each match as she sees their initializations, or she can wait 
+to see both and put them into one transaction. 
+It is slightly cheaper to put them in one, so I would imagine a well-implemented 
+client would have some small time buffer to group as many matches as possible. 
+For this exercise, let’s assume that Hal and Bob respond instantaneously and 
+Alice has a client that knows how to group. 
+Alice’s transaction will be somewhat different than in '''A5'''.
+
+<img src="spec/images/a-init-bc.svg">
+
+===Community Conduct===
+
+By registering, clients agree to abide by the rules described here. These rules 
+are designed to ensure that clients are acting in good faith and maintaining 
+behavior that contribute to a smooth DEX experience for humans. 
+
+====Rules of Community Conduct====
+
+'''Rule 1: You must act on a match when it's your turn'''
+
+In the event that the taker fails to start the atomic swap process within a 
+pre-defined timeout period with their initialization transaction, the maker 
+will be notified that order execution is terminated due to failure of the taker 
+to accept the order. The Maker's limit order will not go 
+back on the order book, but they may be given the option to replace the order. 
+
+In the event that the Maker fails to respond within a pre-defined timeout period 
+to the taker's initialization transaction with an initialization transaction of 
+their own, the taker will be given the option to place a new market order.
+
+'''Rule 2: Your cancellation ratio must at or below 1/5'''
+
+This is the ratio of the count of cancelled orders to the count of completed 
+orders. An order is considered completed for a client once an initialization 
+transaction is broadcast. In the case that the client is the maker and the taker
+(first to act) fails to broadcast their initialization, the order is not 
+considered in calculating the ratio. 
+
+This rule is not in effect until a user has 5 orders to consider. This ensures 
+that a client can potentially cancel their first four orders without penalty, 
+as long as their fifth order is not cancelled. 
+
+====Penalties====
+
+The primary penalty for breeches of conduct is a '''ban''', which includes loss 
+of trading privileges, forfeiture of registration fee, and immediate cancelling 
+of any unfilled orders
+
+===Data API===
+
+Trade history will be made available to both websocket and HTTP clients. 
+
+==Exchange Administration==
+
+===Infrastructure===
+
+===Data Persistence===
+
+==Security==
+
+===Chain-derived Security===
+
+===Data Encryption===
+
+...
+
+==References==
+
+&#91;1&#93; Teall, John L., Financial Trading and Investing, p. 336 (2013)
+
+&#91;2&#93; [https://www.sec.gov/comments/sr-nysearca-2019-01/srnysearca201901-5164833-183434.pdf Bitwise Presentation to the U.S. Securities and Exchange Commission] (2019)
+
+&#91;3&#93; [https://www.jsonrpc.org/specification JSON-RPC 2.0 Specification]
