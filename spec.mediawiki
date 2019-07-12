@@ -52,7 +52,7 @@ The purpose of the DEX is to facilitate such peer-to-peer trades, while
 disincentivizing manipulative or abusive trading patterns, and utilizing an 
 independently verifiable order matching algorithm that is difficult to game by 
 traders and operators alike. The proposed DEX is not: an escrow service, and 
-arbitration service, or a platorm for HFT.
+arbitration service, or a platform for HFT.
 
 While trades are fully trustless, steps are taken to discourage malicious 
 clients from hindering normal trade activity. 
@@ -65,11 +65,11 @@ for minor, first-time or infrequent conduct violations.
 The following list of non-negotiable, fundamental, DEX properties served as a 
 basis for design. 
 
-# Non-custodial.  Assets must be traded directly between clients, without the exchange being in control of assets at any time.
+# Non-custodial. Assets must be traded directly between clients, without the exchange being in control of assets at any time.
 
 # Intermediary-free. Trades must be executed in a secure and trustless manner.
 
-# Resistant to malicious or manipulative trading. Delibarately distruptive behaviour should be disincentivized, and volume manipulation mitigated by pseudo-random epoch-based order matching.
+# Resistant to malicious or manipulative trading. Deliberately disruptive behavior should be disincentivized, and volume manipulation mitigated by pseudo-random epoch-based order matching.
 
 The remainder of this document details the design of the proposed DEX. 
 It is intended as a first resource when implementing servers and clients.
@@ -102,7 +102,7 @@ Match notification via HTTP polling or other request interval-based methods are
 thus not suitable for the DEX system.
 Persistent, full-duplex communication is critical to minimizing communication 
 latencies and wasted bandwidth.
-WebSockets are chosen as the default and preferred communcations protocol for 
+WebSockets are chosen as the default and preferred communications protocol for 
 the DEX exchange API.
 In addition to fulfilling the aforementioned needs, WebSockets are now a 
 well-established technology with client software available for integration in 
@@ -183,7 +183,7 @@ management and server status queries, however WebSocket connections are to be
 the sole means for placing, monitoring, and executing orders in the processes 
 described in Sections 5 and 6.
 The primary reason for limiting the scope of the HTTP API is to eliminate client 
-polling for rapidly chaning resources, such as order status API endpoints.
+polling for rapidly changing resources, such as order status API endpoints.
 
 
 ==Distributed Exchange Design Fundamentals==
@@ -196,7 +196,7 @@ These are:
 * Epoch-based pseudorandom order matching
 * Client identities based on public key infrastructure (PKI)
 * Registration fees in place of per-trade fees
-* An open and rigidly-defined interface for integration of arbitrary assets.
+* An open and rigidly-defined interface for integration of arbitrary assets
 
 This section describes each of these design aspects.
 
@@ -210,7 +210,7 @@ Further, collecting fees from trades executed via atomic swaps (where the server
 is never in control of funds, and settlement occurs directly on-chain) would 
 add considerable complexity to the swap process.
 Registration fees will be configurable by the exchange operator, but the fee 
-would need to be resonable for both the client and server operator.
+would need to be reasonable for both the client and server operator.
 
 ===Lot Sizes===
 
@@ -328,14 +328,14 @@ for monitoring by the DEX. Both clients are immediately informed.
 The process continues with the next order in the list and iterates until all 
 orders are removed from the list.
 
-New limit orders are then added to the orderbook. 
+New limit orders are then added to the order book. 
 Any taker limit orders which are not type "Immediate" and which did not fully 
-match are added to the orderbook as well.
+match are added to the order book as well.
 
 By virtue of the above algorithm, an individual or collaborating pair cannot 
 guarantee their orders will be matched in the presence of other orders in the 
 same epoch.
-This will help mitigate wash trading and order frontrunning.
+This will help mitigate wash trading and order front-running.
 
 ===Identities based on Public Key Infrastructure (PKI) Key Pairs===
 
@@ -370,7 +370,7 @@ type DExAsset interface {
   // The configuration file format is not formalized, so the asset developer
   // will need to publish instructions for configuration.
   Initialize(chan struct{}, string) error
-  // UTXO retreives info about the transaction output.
+  // UTXO retrieves info about the transaction output.
   UTXO(string, int) (DExUTxO, error)
 }
 
@@ -418,7 +418,7 @@ trade assets on chain A for assets on chain B.
 
 # Client requests a new address from wallet B to include in the order as the destination for the funds.
 
-# Client requests wallet A signs the order using the corresponding private keys (how is this done in the case of multiple UTXOs? spell it out.) to demonstrate control of the funds.
+# Client requests wallet A signs the order using the corresponding private keys to demonstrate control of the funds.
 
 ===Limit Orders===
 
@@ -440,7 +440,7 @@ The order <code>quantity</code> must be an integer multiple of the lot size
 
 # Server accumulates a queue of orders, and matches orders once an epoch.
 
-# Server signs and publishes the matched orders, after removing the identity signatures, at the end of the epoch, updates order book
+# Server signs and publishes the matched orders, after removing the identity signatures, at the end of the epoch, updates order book.
 
 
 The anticipated data fields for the limit order <code>params</code> field are 
@@ -452,17 +452,17 @@ as described in Section 5.1.
 |-
 | accountid || string || client account identifier
 |-
-| timestamp || int    || UTC timestamp generated at the time of order submissioation of trades requires a fair amount of messaging between the 2 clients, via the DEX trade API.n
+| timestamp || int    || UTC timestamp generated at the time of order submission of trades requires a fair amount of messaging between the 2 clients, via the DEX trade API.n
 |-
 | tradepair || string || market. trading pair. e.g. DCR/BTC
 |-
 | ordertype || string || "limit" for a limit order
 |-
-| direction || string || one of "buy" or "sell
+| direction || string || one of "buy" or "sell"
 |-
-| ordersize || int    || order size, in atoms (\*1e8
+| ordersize || int    || order size, in atoms (*1e8)
 |-
-| price     || int    || price, in atoms/Satoshi or similar (\*1e8
+| price     || int    || price, in atoms/Satoshi or similar (*1e8)
 |-
 | utxotxid  || string || transaction hash associated with the utxo
 |-
@@ -487,15 +487,15 @@ The successful response will contain a unique order ID that must be referenced f
 
 ===Market Orders===
 
-# Client submits market order as a signed message, where signatures demonstrate control of the unspent funds and the long-lived identity of the client
+# Client submits market order as a signed message, where signatures demonstrate control of the unspent funds and the long-lived identity of the client.
 
-# Server receives the order, adds the time, signs it, stores it, and replies to the client with the signed order and an order id
+# Server receives the order, adds the time, signs it, stores it, and replies to the client with the signed order and an order id.
 
-# Server broadcasts the market order to other connected clients, after removing the client identity signature
+# Server broadcasts the market order to other connected clients, after removing the client identity signature.
 
-# Server accumulates a queue of orders, and matches orders  once an epoch
+# Server accumulates a queue of orders, and matches orders once an epoch.
 
-# Server signs and publishes the matched orders, after removing the identity signatures, at the end of the epoch, updates order book
+# Server signs and publishes the matched orders, after removing the identity signatures, at the end of the epoch, updates order book.
 
 {|
 ! field     !! type   !! description
@@ -508,9 +508,9 @@ The successful response will contain a unique order ID that must be referenced f
 |-
 | ordertype || string || "market" for a market order
 |-
-| direction || string || one of "buy" or "sell
+| direction || string || one of "buy" or "sell"
 |-
-| ordersize || int    || order size, in atoms (\*1e8
+| ordersize || int    || order size, in atoms (*1e8)
 |-
 | utxotxid  || string || transaction hash associated with the utxo
 |-
@@ -539,15 +539,15 @@ The successful response will contain a unique order ID that must be referenced f
 
 Cancel orders cancel existing orders and remove them from the order book. 
 
-# Client submits cancel order as a signed message that references the corresponding unfilled order, where signatures demonstrate control of the unspent funds and the long-lived identity of the client
+# Client submits cancel order as a signed message that references the corresponding unfilled order, where signatures demonstrate control of the unspent funds and the long-lived identity of the client.
 
-# Server receives the order, adds the time, signs it, stores it and replies to the client with the signed order and an order id
+# Server receives the order, adds the time, signs it, stores it and replies to the client with the signed order and an order id.
 
-# Server broadcasts the cancel order to other connected clients, after removing the identity signature
+# Server broadcasts the cancel order to other connected clients, after removing the identity signature.
 
-# Server accumulates a queue of orders, and matches orders  once an epoch
+# Server accumulates a queue of orders, and matches orders once an epoch.
 
-# Server signs and publishes the matched orders, after removing the identity signatures, at the end of the epoch, updates order book
+# Server signs and publishes the matched orders, after removing the identity signatures, at the end of the epoch, updates order book.
 
 {|
 ! field     !! type   !! description
@@ -589,9 +589,9 @@ blockchains.
 Access to markets is granted to client identities represented in long-lived PKI 
 key pairs [ref?] fee to the exchange.
 The process of establishing an identity on the server and gaining authorization 
-for a particular market proceeeds as follows.
+for a particular market proceeds as follows.
 
-# Client connects to server and both identify themselves using a long-lived PKI keypair (TODO: purpose and background on this approach vs. e.g. just passwords or other tokens) after the associated client has paid a (one-time) fee
+# Client connects to server and both identify themselves using a long-lived PKI keypair after the associated client has paid a (one-time) fee.
 
 # Server responds with a fee that the client must pay to get a trading account on the server. Separeate fees may be required for individual markets since the potential for abuse may vary based on the market lot sizes or order book.
 
@@ -602,13 +602,14 @@ in Section 5.
 
 ===Epoch Order Cycle===
 
-Orders are matched with other orders in the same processing epoch (see Section 4.2) using the following algorithm.
+Orders are matched with other orders in the same processing epoch (see Section
+4.2) using the following algorithm.
 
-# Every 10 seconds, a match cycle is initiated.  The period over which orders are collected in a queue is called an "epoch". 
+# Every 10 seconds, a match cycle is initiated. The period over which orders are collected in a queue is called an "epoch".
+
 # The market, limit and cancel orders for each market are collected and pseudorandomly sorted, based on the hash of the hashes of the orders in the queue. Users who want more control over their fill price should use limit orders.
-# Orders are executed according to the pseudorandom ordering, where they are matched against limit orders in the order book. If an order exhausts a given limit order, the next best order is selected until the order is satisfied.
 
-An epoch commences in 5 distinct steps. 
+# Orders are executed according to the pseudorandom ordering, where they are matched against limit orders in the order book. If an order exhausts a given limit order, the next best order is selected until the order is satisfied. An epoch commences in 5 distinct steps. 
 
 # Accumulation
 
@@ -691,10 +692,10 @@ acting in good faith.
 Clients who fail to act on their trades appropriately will be issued a penalty 
 in accordance with the [[#community-conduct|rules of community conduct]].
 
-The following case walkthroughs provide a high-level overview of the entire trade 
-process, and attempt to illustrate how to handle a perfect match, a partial 
-fill, and multiple matches within an epoch. 
-For the sake of illustration, the following simplifications are made.
+The following case walks through provide a high-level overview of the entire
+trade process, and attempt to illustrate how to handle a perfect match, a
+partial fill, and multiple matches within an epoch. For the sake of
+illustration, the following simplifications are made.
 
 <img src="spec/images/ab-profiles.svg" align="right">
 # The lot size for the market is 1 DCR. 
