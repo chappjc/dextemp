@@ -458,7 +458,7 @@ as described in Section 5.1.
 |-
 | ordertype || string || "limit" for a limit order
 |-
-| direction || string || one of "buy" or "sell
+| direction || string || one of "buy" or "sell"
 |-
 | ordersize || int    || order size, in atoms (\*1e8
 |-
@@ -508,7 +508,7 @@ The successful response will contain a unique order ID that must be referenced f
 |-
 | ordertype || string || "market" for a market order
 |-
-| direction || string || one of "buy" or "sell
+| direction || string || one of "buy" or "sell"
 |-
 | ordersize || int    || order size, in atoms (\*1e8
 |-
