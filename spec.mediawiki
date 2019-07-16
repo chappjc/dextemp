@@ -251,17 +251,13 @@ The lot size objects in the `assets` list will have two fields.
 ===Epoch-based Order Matching===
 
 In order to devalue predatory behavior exhibited by certain high-frequency 
-trading algorithms, orders are not matched continuously, but in epochs of 
-fixed duration.
-Specifically, "taker" orders on the server will be matched pseudorandomly 
-within predetermined time epochs to make it much more difficult to frontrun 
-order flow.
-That is, all taker orders placed within the same epoch form two pools of orders
-(buy, sell) that are pseudorandomly shuffled, using a deterministic and
-verifiable algorithm, before matching.
-
-Limit orders are not eligible for matching until the epoch after they are
-received.
+trading algorithms, received orders are not processed continuously, but rather 
+after a shuffling step with all other orders received in a fixed duration period 
+called an ''epoch''. 
+The goal of this algorithm is to reduce the probability that an individual or 
+collaborating pair can submit two orders that match with each other. Limiting 
+this possibility mitigates advantages gained from front-running, spoofing, and 
+other manipulative trading practices. 
 
 ====Epoch Time====
 
@@ -272,34 +268,20 @@ matching epoch index, '''''i''''', and epoch range are computed as
 <!--i = t / d, i d \leq t_i < d (i + 1)-->
 [[File:spec/images/epoch-index.png]]
 
-For example, at the time of writing, '''''t = 1562008475''''' , which for 
-duration '''''d = 10''''' corresponds to epoch number '''''i = 156200847''''' 
-spanning '''''&#91;1562008470, 1562008480)'''''.
+where '''''/''''' is integer division. For example, at the time of writing, 
+'''''t = 1562008475''''' , which for duration '''''d = 10''''' corresponds to 
+epoch number '''''i = 156200847''''' spanning '''''&#91;1562008470, 
+1562008480)'''''.
 This convention allows epoch times to be known without querying the server.
 
 ====Pseudorandom Order Matching====
 
-When the epoch ends, a match cycle begins. Market orders are grouped by side 
-(buy or sell) and a pseudo-random sequence value assigned to each order. This is
-used to determine processing order.
+When the epoch ends, a match cycle begins.
 
-Limit order placed in this epoch are not eligible for matching until the next 
-epoch. Market orders will only match with "standing" limit orders from previous
-epoch. Limit orders match best-price-first. If more than one standing limit 
-order has the same price, they will be shuffled before matching. 
-
-Orders accumulated in the epoch are matched with standing book orders, where a 
-valid order pair may be:
-
-* a market buy and a limit sell
-* a limit buy and a market sell
-* a limit buy and a limit sell with overlapping limit prices
-
-Each order in the epoch order pool is assigned a priority by shuffling the order 
-pool.
-Shuffling will be deterministic, using the Fisher-Yates algorithm where the 
+First, the order pool is shuffled.
+Shuffling is deterministic, using the Fisher-Yates algorithm where the 
 random number generator seed is derived from the hash of the concatenated order 
-ID hashes.
+[[#client-order-management|ID hashes]].
 Specifically for hash function '''''f''''', the seed hash, 
 '''''H<sub>seed</sub>''''' is computed as 
 
@@ -307,35 +289,31 @@ Specifically for hash function '''''f''''', the seed hash,
 [[File:spec/images/seed-eq.png]]
 
 where '''''order<sub>i</sub>''''' represents the order ID of the ith order in a 
-lexicographically sorted list of order IDs, '''''||''''' indicates 
-concatenation, and '''''/''''' is integer division.
+lexicographically sorted list of order IDs and '''''||''''' indicates 
+concatenation.
 
-Each order's unique ID and corresponding hash are assigned as the order is 
-placed, and published at the start of the matching process.
+The order IDs and final hash are published at the start of the matching process.
 This is done so that the shuffling may be independently computed for external 
 verification and to facilitate server mesh operation.
-Section 5 describes the order submission and ID assignment.
 
-Cancellations are processed first. Cancellation can potentially carry a penalty 
-if the client's cancel:complete ratio falls below community conduct guidelines. 
+Orders are processed one at a time. Each order is matched according to its type.
 
-Having prioritized each taker order in the epoch pool with a pseudorandom and 
-verifiably unbiased process, matching begins with the first order in the list.
-The order is paired with the best possible 
-(in terms of rate) compatible standing limit order(s), and the orders are queued 
-for monitoring by the DEX. Both clients are immediately informed.
+1. If the order is a '''cancel order''', any corresponding standing limit order is removed from the list and the cancel order is considered filled. If a cancellation is processed before the order that it cancels, the cancellation will fail, and will need to be re-submitted. That is, cancel orders do not affect down-queue orders, only standing orders.
+
+2. If the order is a limit order with time in force ''standing'' that cannot match immediately (a '''maker'''), it is added to the standing orders. It is immediately able to match orders further down the queue.
+
+3. If the order is a '''taker''', it is matched against the best available standing order. Clients for both orders are notified and the settlement process begins. The orders are set aside for monitoring. If a limit order with time in force ''standing'' on either side of the match is only partially filled, it is added to the standing orders with the appropriate modifications and is immediately available for matching again.
+
+Any unmatched quantity on a limit order with time in force ''immediate'' is 
+left unfilled. 
+Market orders and immediate limit orders cannot match orders further down the 
+queue. 
+
+When a limit order matches a limit order, the price assigned to the match is the 
+average of the two orders, with a split atom going to the maker.
 
 The process continues with the next order in the list and iterates until all 
-orders are removed from the list.
-
-New limit orders are then added to the order book. 
-Any taker limit orders which are not type "Immediate" and which did not fully 
-match are added to the order book as well.
-
-By virtue of the above algorithm, an individual or collaborating pair cannot 
-guarantee their orders will be matched in the presence of other orders in the 
-same epoch.
-This will help mitigate wash trading and order front-running.
+orders have been processed.
 
 ===Identities based on Public Key Infrastructure (PKI) Key Pairs===
 
@@ -425,12 +403,11 @@ trade assets on chain A for assets on chain B.
 Limit orders are for the trade of assets at a rate no higher (buy) or lower 
 (sell) than a specified price. 
 The client may specify the "time in force" of a limit order as one of: (a) 
-''Standing'', which remains on the books until filled or cancelled, or (b) 
-''Immediate'', which will be cancelled if it is not filled during during epoch 
-order matching. As such, the ''Immediate'' option is intended for limit orders 
-with a price that crosses the spread (i.e. a taker rather than a maker).
-The order <code>quantity</code> must be an integer multiple of the lot size 
-(see 3.1.4). 
+''standing'', which remains on the books until filled or cancelled, or (b) 
+''immediate'', which can complete execution wholly or partially unfilled. As 
+such, the ''immediate'' option is intended for limit orders with a price that 
+crosses the spread (i.e. a taker rather than a maker). The order 
+<code>quantity</code> must be an integer multiple of the lot size (see 3.1.4). 
 
 # Client submits limit order as a signed message that includes the fields listed below, where signatures demonstrate control of the unspent funds and the long-lived identity of the client.
 
@@ -448,31 +425,33 @@ listed here. The <code>accountid</code> field is retrieved during registration
 as described in Section 5.1.
 
 {|
-! field     !! type   !! description
+! field       !! type   !! description
 |-
-| accountid || string || client account identifier
+| accountid   || string || client account identifier
 |-
-| timestamp || int    || UTC timestamp generated at the time of order submission of trades requires a fair amount of messaging between the 2 clients, via the DEX trade API.n
+| timestamp   || int    || UTC timestamp generated at the time of order submission of trades requires a fair amount of messaging between the 2 clients, via the DEX trade API.n
 |-
-| tradepair || string || market. trading pair. e.g. DCR/BTC
+| tradepair   || string || market. trading pair. e.g. DCR/BTC
 |-
-| ordertype || string || "limit" for a limit order
+| ordertype   || string || "limit" for a limit order
 |-
-| direction || string || one of "buy" or "sell"
+| direction   || string || one of "buy" or "sell"
 |-
-| ordersize || int    || order size, in atoms (*1e8)
+| ordersize   || int    || order size, in atoms (*1e8)
 |-
-| price     || int    || price, in atoms/Satoshi or similar (*1e8)
+| price       || int    || price, in atoms/Satoshi or similar (*1e8)
 |-
-| utxotxid  || string || transaction hash associated with the utxo
+| timeinforce || string || one of ''standing'' or ''immediate''
 |-
-| utxoindex || int    || the index of the utxo in the transaction outputs
+| utxotxid    || string || transaction hash associated with the utxo
 |-
-| nonce     || string (int|?) | a unique value which identifies this order in communications
+| utxoindex   || int    || the index of the utxo in the transaction outputs
 |-
-| signonce  || string || signature of the nonce showing control of UTXO
+| nonce       || string (int|?) | a unique value which identifies this order in communications
 |-
-| sigorder  || string || signature of the order data by account privkey
+| signonce    || string || signature of the nonce showing control of UTXO
+|-
+| sigorder    || string || signature of the order data by account privkey
 |}
 
 The successful response will contain a unique order ID that must be referenced for cancellation. 
@@ -535,6 +514,10 @@ The successful response will contain a unique order ID that must be referenced f
 |-
 |}
 
+Market orders cannot be cancelled.
+Any portion of the requested quantity that does not match immediately is left 
+unfilled. 
+
 ===Cancel Order===
 
 Cancel orders cancel existing orders and remove them from the order book. 
@@ -583,7 +566,6 @@ This section describes how the exchange service matches orders from registered
 users, and facilitates order execution by the clients directly on their assets' 
 blockchains.
 
-
 ===Account Creation===
 
 Access to markets is granted to client identities represented in long-lived PKI 
@@ -599,86 +581,6 @@ for a particular market proceeds as follows.
 
 An authenticated and authorized client may proceed to place orders as described 
 in Section 5.
-
-===Epoch Order Cycle===
-
-Orders are matched with other orders in the same processing epoch (see Section
-4.2) using the following algorithm.
-
-# Every 10 seconds, a match cycle is initiated. The period over which orders are collected in a queue is called an "epoch".
-
-# The market, limit and cancel orders for each market are collected and pseudorandomly sorted, based on the hash of the hashes of the orders in the queue. Users who want more control over their fill price should use limit orders.
-
-# Orders are executed according to the pseudorandom ordering, where they are matched against limit orders in the order book. If an order exhausts a given limit order, the next best order is selected until the order is satisfied. An epoch commences in 5 distinct steps. 
-
-# Accumulation
-
-# Cancellation
-
-# Randomization
-
-# Matching
-
-# Limit Order Sorting
-
-<img src="spec/images/empty-epoch.svg" align="right">
-At the beginning of the epoch, there are only standing limit orders. 
-The '''epoch pool''' where orders are collected is empty.  
-Every limit or market order has a quantity, which is an integer multiple of the 
-base asset's lot size. 
-Every order is also assigned a unique ID (the L#’s in the diagrams). Limit 
-orders are kept ordered by price rate. 
-For buy orders, the zeroth price bin contains all orders who share the highest 
-rate of the buy orders. 
-For sell orders, the zeroth price bin contains those orders that share the 
-lowest price of the sell orders.
-
-'''Accumulation'''
-
-For the duration of the epoch, orders are accumulated and sorted by order type 
-and direction. 
-Rather than sorting by market and limit, orders are sorted by taker and maker, 
-so that limit orders with parameters that can potentially match with standing 
-limit orders on the other side will participate in the match cycle. 
-
-<img src="spec/images/full-epoch.svg">
-
-'''Cancellation'''
-
-<img src="spec/images/cancel-order.svg" align="right">
-Cancellations are processed first. Order doesn’t matter. 
-Orders removed during this step will not be available to match with any taker 
-orders in the epoch pool. 
-
-'''Randomization'''
-
-The market orders for each direction are assigned a pseudo-random sequencing 
-value. 
-This value determines the order in which they will be processed.
-
-'''Order Matching'''
-
-Orders are then matched. 
-Taker orders match against zeroth bins first, and proceed away from the best 
-price a bin at-a-time.
-
-During matching, orders may be divided to facilitate matching with more than one 
-other participant. 
-These divisions must still obey the integral lot multiple rule. 
-Partially filled orders are not removed from the stack.
-
-<img src="spec/images/order-matching.svg">
-
-'''Limit Order Sorting'''
-
-Limit orders are added to the stack. If more than one limit order share a rate, 
-they will undergo a shuffle at this time.
-
-The end of step 6 could be thought of as the beginning of a new epoch, starting 
-again at step 1, though in practice the orders have already been accumulating 
-while this epoch processed. 
-
-<img src="spec/images/limit-sorting.svg">
 
 ===Atomic Settlement===
 
