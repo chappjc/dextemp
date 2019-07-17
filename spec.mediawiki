@@ -317,9 +317,22 @@ orders have been processed.
 
 ===Identities based on Public Key Infrastructure (PKI) Key Pairs===
 
-The server as well as the clients are identified and authenticated using public 
-keys, with matching private keys used to sign and authorize orders.
-This is done because...
+The server and the clients are identified and authenticated using public keys,
+with matching private keys used to sign and authorize orders and other messages.
+Establishing client identity with public keys keeps the notion of client
+identity to a minimum, while providing a number of other security benefits
+throughout the order placement and execution processes.
+
+All data submitted to the exchange server from a client must be signed with the
+client's private key and authenticated by the server using the corresponding
+public key, so using client public keys directly for identity purposes is a
+natural simplification that obviates client user names and passwords.
+
+Further, since Politeia, Decred's governance platform, also employs a PKI, the
+same identities may be used on both services to facilitate time-stamping
+exchange data via Politeia. For example, given common identities between the DEX
+and Politeia, anchoring data related to DEX client and server conduct on the
+Decred blockchain may be useful for establishing a reputation system.
 
 ===Blockchain Interaction===
 
